@@ -183,6 +183,15 @@ and click-through field metadata (grower, farm, field, crop, area), include a
 grower/farm/field list that zooms on click, and embed only boundary coordinates —
 never rasters or imagery.
 
+It also adds optional Sentinel NDVI overlays for every 2021 scene. Each field has
+its own date dropdown and on/off checkbox, so different fields can display
+different dates at once. A single opacity slider controls all visible overlays
+and an RdYlGn legend appears while any overlay is shown. NDVI GeoTIFFs are
+converted to small field-clipped transparent PNGs next to each map and
+referenced by relative URL, so the default HTML stays small. Each map is also
+written as a `*_standalone.html` copy that embeds those PNGs for downloading a
+single working file.
+
 ```bash
 export DATA_PIPELINE_DATA_ROOT=/absolute/path/to/my-farm-advisor-runtime
 cd "${DATA_PIPELINE_DATA_ROOT}/data-pipeline/src"
@@ -193,7 +202,9 @@ cd "${DATA_PIPELINE_DATA_ROOT}/data-pipeline/src"
 Outputs: `maps/all-growers_fields_map.html` with
 `manifests/all_growers_web_map.json`, plus
 `growers/<grower>/maps/<grower>_fields_map.html` and
-`growers/<grower>/manifests/grower_web_map.json`. Omit `--grower-slug` to render
+`growers/<grower>/manifests/grower_web_map.json`. NDVI PNGs sit in a `ndvi/`
+folder beside each map, and each HTML has a `*_standalone.html` copy with the
+NDVI images embedded for single-file download. Omit `--grower-slug` to render
 every grower. See [`grower-web-map/README.md`](grower-web-map/README.md) for
 flags and the size budget.
 
