@@ -173,6 +173,30 @@ python scripts/run_maturity_by_fips.py \
 
 Use `--weather-backend api` only when explicitly debugging the legacy NASA POWER point API path for county weather.
 
+## Grower web maps
+
+[`grower-web-map/`](grower-web-map/SKILL.md) renders lightweight interactive
+HTML maps from the field polygons the pipeline already wrote. It writes one
+combined map covering every selected grower plus one map per grower. Both use
+Leaflet with ESRI World Imagery as the only satellite basemap, support zoom
+and click-through field metadata (grower, farm, field, crop, area), include a
+grower/farm/field list that zooms on click, and embed only boundary coordinates —
+never rasters or imagery.
+
+```bash
+export DATA_PIPELINE_DATA_ROOT=/absolute/path/to/my-farm-advisor-runtime
+cd "${DATA_PIPELINE_DATA_ROOT}/data-pipeline/src"
+"${DATA_PIPELINE_DATA_ROOT}/data-pipeline/.venv/bin/python" \
+  scripts/render_grower_web_map.py --grower-slug acme-grower --grower-slug beta-grower
+```
+
+Outputs: `maps/all-growers_fields_map.html` with
+`manifests/all_growers_web_map.json`, plus
+`growers/<grower>/maps/<grower>_fields_map.html` and
+`growers/<grower>/manifests/grower_web_map.json`. Omit `--grower-slug` to render
+every grower. See [`grower-web-map/README.md`](grower-web-map/README.md) for
+flags and the size budget.
+
 ## Default DEM terrain package
 
 Normal farm pipeline initialization and add-field runs that invoke `scripts/run_farm_pipeline.py` include real DEM terrain by default. The pipeline calls `scripts/ingest/download_dem_terrain.py` immediately after field boundary download, passes live real-source permission through `--allow-live-downloads`, and writes elevation, slope, aspect, hillshade, curvature, wetness, depression, relative elevation, and erosion-proxy products under the runtime field tree. Generated farm and field reports do not integrate terrain metrics in this change.
