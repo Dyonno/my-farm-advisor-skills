@@ -35,6 +35,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 from paths import DATA_ROOT  # pyright: ignore[reportMissingImports]
+from us_states import state_fips as resolve_state_fips  # pyright: ignore[reportMissingImports]
 
 import fsspec  # pyright: ignore[reportMissingImports]
 import geopandas as gpd  # pyright: ignore[reportMissingImports]
@@ -59,6 +60,27 @@ def file_crs(pf: pq.ParquetFile) -> CRS:
     return CRS.from_json_dict(geo["columns"]["geometry"]["crs"])
 
 
+def _clean_string_values(values: list[object]) -> set[str]:
+    cleaned: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if text and text.lower() != "nan":
+            cleaned.add(text)
+    return cleaned
+
+
+def _next_field_index(field_ids: set[str], prefix: str) -> int:
+    """Return the next integer suffix for ``<prefix>N`` field IDs."""
+    highest = 0
+    for field_id in field_ids:
+        if not field_id.startswith(prefix):
+            continue
+        suffix = field_id[len(prefix):]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return highest + 1
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Real US field boundaries from USDA CSB (FIBOA geoparquet).")
     ap.add_argument("--bbox", type=float, nargs=4, required=True, metavar=("S", "W", "N", "E"))
@@ -67,7 +89,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--field-prefix", required=True)
     ap.add_argument("--country", default="US")
     ap.add_argument("--state", default="")
+    ap.add_argument("--state-fips", default="")
+    ap.add_argument("--county", default="", help="Only keep fields in this county name")
     ap.add_argument("--year", default="")
+    ap.add_argument(
+        "--append",
+        action="store_true",
+        help=(
+            "Append new fields to the existing farm boundary, skipping CSB IDs "
+            "already present and continuing the field-number suffix."
+        ),
+    )
     args = ap.parse_args(argv)
 
     grower = os.environ.get("AG_GROWER_SLUG") or sys.exit("AG_GROWER_SLUG required")
@@ -75,6 +107,24 @@ def main(argv: list[str] | None = None) -> int:
     farm_dir = DATA_ROOT / "growers" / grower / "farms" / farm
     if not farm_dir.exists():
         sys.exit(f"farm dir missing: {farm_dir} (create farm.json first)")
+
+    farm_bounds = farm_dir / "boundary" / "field_boundaries.geojson"
+    existing_fields = gpd.read_file(farm_bounds) if farm_bounds.exists() else None
+    existing_csb_ids: set[str] = set()
+    existing_field_ids: set[str] = set()
+    if existing_fields is not None:
+        if "csb_id" in existing_fields.columns:
+            existing_csb_ids = _clean_string_values(existing_fields["csb_id"].tolist())
+        if "field_id" in existing_fields.columns:
+            existing_field_ids = _clean_string_values(existing_fields["field_id"].tolist())
+    start_index = (
+        _next_field_index(existing_field_ids, args.field_prefix) if args.append else 1
+    )
+    resolved_state_fips = (
+        str(args.state_fips).strip().zfill(2)
+        if str(args.state_fips).strip()
+        else resolve_state_fips(args.state) or ""
+    )
 
     s, w, n, e = args.bbox
     fo = fsspec.open(URL, block_size=2**26).open()
@@ -117,16 +167,20 @@ def main(argv: list[str] | None = None) -> int:
                 if ha >= args.min_area_ha:
                     rows.append((fid, crop, county, ha, poly))
     rows.sort(key=lambda r: (-r[3], str(r[0])))
+    if args.county:
+        target_county = args.county.strip().casefold()
+        rows = [row for row in rows if str(row[2] or "").strip().casefold() == target_county]
+    if args.append:
+        rows = [row for row in rows if str(row[0]).strip() not in existing_csb_ids]
     rows = rows[: args.max_fields]
     if not rows:
-        print("no fields above threshold in this window")
+        print("no new fields above threshold in this window")
         return 1
 
     inv_rows = []
     merged = None
-    farm_bounds = farm_dir / "boundary" / "field_boundaries.geojson"
     for i, (fid, crop, county, ha, poly) in enumerate(rows):
-        slug = f"{args.field_prefix}{i + 1}"
+        slug = f"{args.field_prefix}{start_index + i}"
         fdir = farm_dir / "fields" / slug
         (fdir / "boundary").mkdir(parents=True, exist_ok=True)
         gdf = gpd.GeoDataFrame(
@@ -135,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
                     "field_id": slug,
                     "country": args.country,
                     "state": args.state,
+                    "state_fips": resolved_state_fips,
                     "year": args.year,
                     "area_ha_est": round(ha, 1),
                     "crop": crop,
@@ -152,9 +207,10 @@ def main(argv: list[str] | None = None) -> int:
         inv_rows.append({"field_id": slug, "field_slug": slug})
         print(f"field {slug}  {ha:>8.1f} ha  crop={crop}  county={county}  csb={fid}")
 
-    if farm_bounds.exists():
-        old = gpd.read_file(farm_bounds)
-        keep = old[~old["field_id"].isin([r["field_id"] for r in inv_rows])]
+    if existing_fields is not None:
+        keep = existing_fields[
+            ~existing_fields["field_id"].astype(str).isin([r["field_id"] for r in inv_rows])
+        ]
         merged = pd.concat([keep, merged], ignore_index=True)
     farm_bounds.parent.mkdir(exist_ok=True)
     assert merged is not None
@@ -163,10 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     inv = farm_dir / "manifests" / "field-inventory.csv"
     inv.parent.mkdir(exist_ok=True)
     frame = pd.DataFrame(inv_rows)
-    if inv.exists():
+    if args.append and inv.exists():
         frame = pd.concat([pd.read_csv(inv), frame]).drop_duplicates(subset="field_id", keep="last")
     frame.to_csv(inv, index=False)
 
+    all_field_ids = sorted(merged["field_id"].astype(str).tolist())
     prov = {
         "source": "FIBOA us-usda-cropland (USDA NASS Crop Sequence Boundaries)",
         "url": URL,
@@ -177,7 +234,11 @@ def main(argv: list[str] | None = None) -> int:
         "total_row_groups": pf.metadata.num_row_groups,
         "min_area_ha": args.min_area_ha,
         "accessed_at": _dt.datetime.now(_dt.timezone.utc).isoformat(timespec="seconds"),
-        "fields": [r["field_id"] for r in inv_rows],
+        "append": bool(args.append),
+        "existing_field_count": len(existing_field_ids),
+        "new_fields": [r["field_id"] for r in inv_rows],
+        "total_field_count": len(all_field_ids),
+        "all_fields": all_field_ids,
     }
     mdir = farm_dir / "manifests"
     mdir.mkdir(exist_ok=True)

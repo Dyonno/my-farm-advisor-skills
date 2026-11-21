@@ -29,6 +29,7 @@ from paths import (
     shared_cdl_state_raster_path,
 )
 from reporting_bootstrap import ensure_skill_path
+from us_states import state_fips as resolve_state_fips
 
 ensure_skill_path("cdl-cropland")
 
@@ -189,13 +190,48 @@ def parse_args() -> argparse.Namespace:
 
 
 def _state_fips_values(fields: gpd.GeoDataFrame) -> list[str]:
-    if "state_fips" not in fields.columns:
-        return ["19"]
-    values = (
-        pd.Series(fields["state_fips"], dtype="object").fillna("").astype(str).str.strip().tolist()
-    )
-    unique_values = sorted({value.zfill(2) for value in values if value})
-    return unique_values or ["19"]
+    """Resolve every state present in the boundary to a two-digit FIPS code.
+
+    Boundaries written by different ingest paths may carry ``state_fips``,
+    ``state`` as an abbreviation/full name, or both. Never fall back to a
+    hard-coded state: extracting the wrong CDL raster silently produces empty
+    or incorrect crop history.
+    """
+    values: list[str] = []
+    unknown: set[str] = set()
+    for column in ("state_fips", "state"):
+        if column not in fields.columns:
+            continue
+        for raw in fields[column].tolist():
+            text = str(raw).strip()
+            if not text or text.lower() in {"nan", "none"}:
+                continue
+            resolved = resolve_state_fips(raw)
+            if resolved:
+                values.append(resolved)
+            else:
+                unknown.add(text)
+    if unknown:
+        raise ValueError(
+            "Unable to resolve state FIPS for field state value(s): "
+            + ", ".join(sorted(unknown))
+            + ". Add a valid state name, abbreviation, or two-digit FIPS."
+        )
+    unique_values = sorted(set(values))
+    if not unique_values:
+        raise ValueError(
+            "Boundary has no usable state or state_fips value; cannot select a CDL raster."
+        )
+    return unique_values
+
+
+def _field_state_fips_series(fields: gpd.GeoDataFrame) -> pd.Series:
+    """Resolve a state FIPS code per field row from state_fips or state."""
+    values: list[str | None] = []
+    for _, row in fields.iterrows():
+        resolved = resolve_state_fips(row.get("state_fips")) or resolve_state_fips(row.get("state"))
+        values.append(resolved)
+    return pd.Series(values, index=fields.index, dtype="object")
 
 
 def _table_field_ids(csv_path: Path) -> set[str]:
@@ -256,6 +292,18 @@ def main():
             f"(ACI {ACI_MIN_YEAR}+)"
         )
     state_fips_values = _state_fips_values(us_fields)
+    state_fips_series = _field_state_fips_series(us_fields)
+    unresolved = sorted(
+        {
+            str(row.get("state") or row.get("state_fips") or "")
+            for _, row in us_fields.loc[state_fips_series.isna()].iterrows()
+        }
+    )
+    if unresolved:
+        raise ValueError(
+            "Unable to resolve state FIPS for field state value(s): "
+            + ", ".join(value for value in unresolved if value)
+        )
     if not us_fields.empty:
         print("State CDL coverage:", ", ".join(state_fips_values))
 
@@ -309,10 +357,7 @@ def main():
         state_frames: list[pd.DataFrame] = []
         if not us_fields.empty:
             for state_fips in state_fips_values:
-                if "state_fips" in us_fields.columns:
-                    state_mask = us_fields["state_fips"].astype(str).str.zfill(2) == state_fips
-                else:
-                    state_mask = pd.Series([True] * len(us_fields), index=us_fields.index)
+                state_mask = state_fips_series == state_fips
                 state_fields = us_fields.loc[state_mask].copy()
                 if state_fields.empty:
                     continue

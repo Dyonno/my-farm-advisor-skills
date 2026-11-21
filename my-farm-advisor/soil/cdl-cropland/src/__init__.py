@@ -19,6 +19,11 @@ from pyproj import Transformer
 from rasterio.features import rasterize
 
 try:
+    from .cdl_codes import CDL_CODES
+except ImportError:  # Support top-level imports when src/ is on sys.path.
+    from cdl_codes import CDL_CODES
+
+try:
     from agri_toolkit.core.config import Config
 except Exception:  # pragma: no cover
     import logging
@@ -55,95 +60,8 @@ class CDLCroplandSkill:
         >>> skill.plot_crop_map(cdl, year=2024)
     """
 
-    # Major CDL crop codes
-    CROP_CODES = {
-        1: "Corn",
-        2: "Cotton",
-        3: "Rice",
-        4: "Sorghum",
-        5: "Soybeans",
-        6: "Sunflower",
-        10: "Peanuts",
-        11: "Tobacco",
-        12: "Sweet Corn",
-        13: "Pop or Orn Corn",
-        14: "Mint",
-        21: "Barley",
-        22: "Durum Wheat",
-        23: "Spring Wheat",
-        24: "Winter Wheat",
-        25: "Other Small Grains",
-        26: "Dbl Crop WinWht/Soybeans",
-        27: "Rye",
-        28: "Oats",
-        29: "Millet",
-        30: "Speltz",
-        31: "Canola",
-        32: "Flaxseed",
-        33: "Safflower",
-        34: "Rape Seed",
-        35: "Mustard",
-        36: "Alfalfa",
-        37: "Other Hay/Non Alfalfa",
-        38: "Camelina",
-        39: "Buckwheat",
-        41: "Sugarbeets",
-        42: "Dry Beans",
-        43: "Potatoes",
-        44: "Other Crops",
-        45: "Sugarcane",
-        46: "Sweet Potatoes",
-        47: "Misc Vegs & Fruits",
-        48: "Watermelons",
-        49: "Onions",
-        50: "Cucumbers",
-        51: "Chick Peas",
-        52: "Lentils",
-        53: "Peas",
-        54: "Tomatoes",
-        55: "Caneberries",
-        56: "Hops",
-        57: "Herbs",
-        58: "Clover/Wildflowers",
-        59: "Sod/Grass Seed",
-        60: "Switchgrass",
-        61: "Fallow/Idle Cropland",
-        62: "Pasture/Grass",
-        63: "Forest",
-        64: "Shrubland",
-        65: "Barren",
-        66: "Cherries",
-        67: "Peaches",
-        68: "Apples",
-        69: "Grapes",
-        70: "Christmas Trees",
-        71: "Other Tree Crops",
-        72: "Citrus",
-        74: "Pecans",
-        75: "Almonds",
-        76: "Walnuts",
-        77: "Pears",
-        81: "Clouds/No Data",
-        82: "Developed",
-        83: "Water",
-        87: "Wetlands",
-        88: "Nonag/Undefined",
-        92: "Aquaculture",
-        111: "Open Water",
-        112: "Perennial Ice/Snow",
-        121: "Developed/Open Space",
-        122: "Developed/Low Intensity",
-        123: "Developed/Med Intensity",
-        124: "Developed/High Intensity",
-        131: "Barren",
-        141: "Deciduous Forest",
-        142: "Evergreen Forest",
-        143: "Mixed Forest",
-        152: "Shrubland",
-        176: "Grass/Pasture",
-        190: "Woody Wetlands",
-        195: "Herbaceous Wetlands",
-    }
+    # Major CDL crop codes (shared canonical legend in cdl_codes.py)
+    CROP_CODES = CDL_CODES
 
     CDL_VALUE_URL = "https://nassgeodata.gmu.edu/axis2/services/CDLService/GetCDLValue"
 
