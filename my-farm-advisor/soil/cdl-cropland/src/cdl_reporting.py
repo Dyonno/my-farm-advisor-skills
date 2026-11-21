@@ -10,19 +10,10 @@ import pandas as pd
 import rasterio
 from rasterstats import zonal_stats
 
-CDL_CODES = {
-    0: "No Data",
-    1: "Corn",
-    5: "Soybeans",
-    24: "Winter Wheat",
-    28: "Alfalfa",
-    36: "Forest",
-    38: "Grassland",
-    43: "Open Water",
-    61: "Fallow/Idle",
-    63: "Other",
-    176: "Grass/Pasture",
-}
+try:
+    from .cdl_codes import CDL_CODES
+except ImportError:  # Support top-level imports when src/ is on sys.path.
+    from cdl_codes import CDL_CODES
 
 
 def filter_cdl_categories(crop_mix: pd.DataFrame) -> pd.DataFrame:
